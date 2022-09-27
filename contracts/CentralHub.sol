@@ -5,17 +5,15 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./DAOSafety.sol";
-import "./TokenChainPortConnector.sol";
-import "./ITokenChainPort.sol";
 import "./ValidatorPool.sol";
 
-contract CentralHub is
-    DAOSafety,
-    ReentrancyGuard,
-    TokenChainPortConnector,
-    ValidatorPool
-{
+contract CentralHub is DAOSafety, ReentrancyGuard, ValidatorPool {
     // ========== Events ==========
+    event ForeignTokenAddressesUpdate(
+        address indexed homeTokenAddress,
+        uint256 indexed chainId,
+        address indexed foreignTokenAddress
+    );
     event ForeignDeliveryRequest(
         address indexed account,
         address indexed homeTokenAddress,
@@ -30,6 +28,8 @@ contract CentralHub is
     );
     // ========== Public variables ==========
     mapping(bytes32 => bool) public txnHashes;
+    mapping(address => mapping(uint256 => address))
+        public foreignTokenAddresses;
 
     // ========== Private/internal variables ==========
     uint256 internal immutable HOME_CHAIN_ID;
@@ -57,10 +57,9 @@ contract CentralHub is
         uint256 amount,
         uint256 toChainId
     ) external whenNotPaused nonReentrant {
-        // token
-        address foreignTokenAddress = ITokenChainPort(
-            tokenChainPorts[homeTokenAddress]
-        ).tokenChains(toChainId);
+        address foreignTokenAddress = foreignTokenAddresses[homeTokenAddress][
+            toChainId
+        ];
 
         require(foreignTokenAddress != address(0), "Token not portable");
         require(
@@ -92,9 +91,10 @@ contract CentralHub is
         require(!txnHashes[txnHash], "Already imported");
         txnHashes[txnHash] = true;
         // token address on bridged chain
-        address foreignTokenAddress = ITokenChainPort(
-            tokenChainPorts[homeTokenAddress]
-        ).tokenChains(fromChainId);
+
+        address foreignTokenAddress = foreignTokenAddresses[homeTokenAddress][
+            fromChainId
+        ];
 
         require(foreignTokenAddress != address(0), "Token not portable");
 
@@ -126,11 +126,17 @@ contract CentralHub is
 
     // ========== Only DAO ==========
 
-    function configTokenChainPorts(address tokenAddress, address tokenChainPort)
-        external
-        onlyDAO
-    {
-        _configTokenChainPorts(tokenAddress, tokenChainPort);
+    function configForeignTokenAddress(
+        address homeTokenAddress,
+        uint256 chainId,
+        address foreignTokenAddress
+    ) external onlyDAO {
+        foreignTokenAddresses[homeTokenAddress][chainId] = foreignTokenAddress;
+        emit ForeignTokenAddressesUpdate(
+            homeTokenAddress,
+            chainId,
+            foreignTokenAddress
+        );
     }
 
     /// @dev Only trusted addresses can be validators.
